@@ -1,4 +1,5 @@
-import React, { useState, FormEvent, ChangeEvent } from 'react';
+import React, { useState } from 'react';
+import type { FormEvent, ChangeEvent } from 'react';
 
 // Define the Props interface for clear component contracts
 interface AdminLoginProps {
@@ -32,7 +33,7 @@ const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess }) => {
         setLoading(true);
 
         try {
-            const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+            const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
             const response = await fetch(`${apiUrl}/admin/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -60,7 +61,7 @@ const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess }) => {
             <div className="absolute inset-0 z-0 opacity-[0.03] pointer-events-none bg-[radial-gradient(#0f172a_1px,transparent_1px)] [background-size:20px_20px]" />
 
             <div className="relative z-10 w-full max-w-md p-10 bg-white border border-slate-200 rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.05)]">
-                
+
                 {/* Branding Section */}
                 <div className="flex flex-col items-center mb-10">
                     <div className="h-12 w-12 bg-teal-600 rounded-2xl flex items-center justify-center text-white font-bold text-xl mb-4 shadow-lg shadow-teal-600/20">
@@ -128,7 +129,7 @@ const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess }) => {
                         </div>
                     )}
                 </form>
-                
+
                 {/* Footer Security Disclaimer */}
                 <div className="mt-10 pt-8 border-t border-slate-100 flex flex-col items-center">
                     <p className="text-[10px] text-slate-400 uppercase tracking-[0.2em] font-bold">

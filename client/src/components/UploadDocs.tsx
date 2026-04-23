@@ -30,19 +30,40 @@ const PolicyUpload: React.FC<PolicyUploadProps> = ({ onUploadComplete, onClose }
     if (!file) return;
     setIsUploading(true);
     
-    // Simulating the Indexing process for the UI
-    for (let i = 0; i <= 100; i += 20) {
-      setUploadProgress(i);
-      await new Promise(r => setTimeout(r, 300));
-    }
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('docType', docType);
 
-    onUploadComplete({
-      name: file.name,
-      type: docType,
-      timestamp: new Date().toLocaleDateString()
-    });
-    setIsUploading(false);
-    onClose();
+      const token = localStorage.getItem('adminToken');
+
+      const response = await fetch('http://localhost:8000/admin/upload', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error('Upload failed');
+      }
+
+      const data = await response.json();
+
+      onUploadComplete({
+        name: file.name,
+        type: docType,
+        timestamp: new Date().toLocaleDateString(),
+        size: `${(file.size / 1024 / 1024).toFixed(2)} MB`
+      });
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      alert('Failed to upload file');
+    } finally {
+      setIsUploading(false);
+      onClose();
+    }
   };
 
   return (

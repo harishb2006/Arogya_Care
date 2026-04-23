@@ -17,24 +17,34 @@ interface AdminDashboardProps {
 const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout }) => {
   const [activeTab, setActiveTab] = useState<'policies' | 'analytics' | 'settings'>('policies');
   const [isUploading, setIsUploading] = useState(false);
-  
-  // Mock Data - Representing the Vector Store state
-  const [policies, setPolicies] = useState<PolicyDocument[]>([
-    { id: '1', name: 'Star_Health_Gold_2024.pdf', uploadDate: '2024-04-20', size: '1.2 MB', status: 'indexed' },
-    { id: '2', name: 'HDFC_Ergo_Suraksha.pdf', uploadDate: '2024-04-22', size: '850 KB', status: 'indexed' },
-    { id: '3', name: 'Niva_Bupa_Reassure.pdf', uploadDate: '2024-04-23', size: '2.1 MB', status: 'processing' },
-  ]);
 
-  const handleDelete = (id: string) => {
-    // Assessment Requirement: "Verify deletion removes from the vector store"
+  const [policies, setPolicies] = useState<PolicyDocument[]>([]);
+
+  React.useEffect(() => {
+    fetch('http://localhost:8000/admin/documents')
+      .then(res => res.json())
+      .then(data => setPolicies(data))
+      .catch(err => console.error("Failed to fetch policies:", err));
+  }, []);
+
+  const handleDelete = async (id: string) => {
     if (window.confirm("Are you sure? This will immediately remove the document from the Vector Store index.")) {
-      setPolicies(policies.filter(p => p.id !== id));
+      try {
+        const res = await fetch(`http://localhost:8000/admin/documents/${id}`, { method: 'DELETE' });
+        if (res.ok) {
+          setPolicies(policies.filter(p => p.id !== id));
+        } else {
+          alert("Failed to delete from vector store");
+        }
+      } catch (e) {
+        console.error("Delete error", e);
+      }
     }
   };
 
   return (
     <div className="flex min-h-screen bg-slate-50 font-sans text-slate-900">
-      
+
       {/* --- Sidebar --- */}
       <aside className="w-64 bg-slate-900 text-white flex flex-col">
         <div className="p-8">
@@ -42,9 +52,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout }) => {
             <div className="h-8 w-8 bg-teal-500 rounded-lg flex items-center justify-center font-bold">A</div>
             <span className="font-bold tracking-tight text-xl">AarogyaID</span>
           </div>
-          
+
           <nav className="space-y-1">
-            <button 
+            <button
               onClick={() => setActiveTab('policies')}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'policies' ? 'bg-teal-600 text-white' : 'text-slate-400 hover:bg-slate-800'}`}
             >
@@ -57,7 +67,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout }) => {
             </button>
           </nav>
         </div>
-        
+
         <div className="mt-auto p-8 border-t border-slate-800">
           <button onClick={onLogout} className="flex items-center gap-2 text-slate-400 hover:text-rose-400 transition-colors">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
@@ -73,8 +83,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout }) => {
             <h2 className="text-3xl font-bold text-slate-900">Policy Management</h2>
             <p className="text-slate-500 mt-1">Manage documents for RAG grounding.</p>
           </div>
-          
-          <button 
+
+          <button
             onClick={() => setIsUploading(true)}
             className="flex items-center gap-2 px-6 py-3 bg-slate-900 text-white rounded-2xl font-semibold hover:bg-slate-800 transition-all shadow-lg shadow-slate-900/10"
           >
@@ -110,10 +120,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout }) => {
                   </td>
                   <td className="px-6 py-5 text-sm text-slate-600">{policy.uploadDate}</td>
                   <td className="px-6 py-5">
-                    <span className={`px-3 py-1 rounded-full text-xs font-bold ${
-                      policy.status === 'indexed' ? 'bg-teal-50 text-teal-700' : 
-                      policy.status === 'processing' ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700'
-                    }`}>
+                    <span className={`px-3 py-1 rounded-full text-xs font-bold ${policy.status === 'indexed' ? 'bg-teal-50 text-teal-700' :
+                        policy.status === 'processing' ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700'
+                      }`}>
                       {policy.status.toUpperCase()}
                     </span>
                   </td>
@@ -122,7 +131,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout }) => {
                       <button className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all">
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                       </button>
-                      <button 
+                      <button
                         onClick={() => handleDelete(policy.id)}
                         className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
                       >
@@ -134,7 +143,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout }) => {
               ))}
             </tbody>
           </table>
-          
+
           {policies.length === 0 && (
             <div className="py-20 flex flex-col items-center text-slate-400">
               <svg className="w-16 h-16 mb-4 opacity-20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" /></svg>
@@ -146,8 +155,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout }) => {
 
       {/* Upload Modal */}
       {isUploading && (
-        <PolicyUpload 
-          onClose={() => setIsUploading(false)} 
+        <PolicyUpload
+          onClose={() => setIsUploading(false)}
           onUploadComplete={(metadata) => {
             const newPolicy = {
               id: Date.now().toString(),
@@ -158,7 +167,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout }) => {
             };
             setPolicies([newPolicy, ...policies]);
             setIsUploading(false);
-          }} 
+          }}
         />
       )}
     </div>
