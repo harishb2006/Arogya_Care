@@ -1,8 +1,9 @@
 import os
+# Force hot-reload
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
-from routes import admin
+from routes import admin, agent
 
 load_dotenv()
 
@@ -17,6 +18,7 @@ app.add_middleware(
 )
 
 app.include_router(admin.router)
+app.include_router(agent.router)
 
 @app.get("/")
 def home():
