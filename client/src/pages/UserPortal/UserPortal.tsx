@@ -119,7 +119,10 @@ const UserPortal = () => {
                                 className="bg-white p-8 md:p-12 rounded-[2rem] shadow-2xl shadow-teal-900/5 border border-slate-100"
                             >
                                 <RecommendationTable recommendation={recommendation} formData={formData} />
-                                <Chat profile={formData} recommendedPolicy={extractRecommendedPolicy(recommendation)} />
+                                <Chat 
+                                    profile={{...formData, pre_existing_conditions: formData.pre_existing_conditions.join(', ') || 'None'}} 
+                                    recommendedPolicy={extractRecommendedPolicy(recommendation)} 
+                                />
                                 <button
                                     onClick={resetForm}
                                     className="w-full mt-8 py-4 bg-slate-900 text-white rounded-2xl font-bold hover:bg-teal-600 transition-all shadow-lg shadow-slate-900/20"

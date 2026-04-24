@@ -38,7 +38,7 @@ def extract_metadata_from_text(text: str) -> list[dict]:
     groq_key = os.getenv("GROQ_API_KEY") or os.getenv("groq")
     if not groq_key: return []
     try:
-        llm = ChatGroq(model='llama-3.3-70b-versatile', temperature=0.0, api_key=groq_key)
+        llm = ChatGroq(model='llama-3.1-8b-instant', temperature=0.0, api_key=groq_key)
         structured_llm = llm.with_structured_output(PolicyListSchema)
         truncated_text = text[:100000]
         prompt = f"Extract ALL insurance policies from the following document. Return every policy you find as a separate item in the list.\n\nDocument:\n{truncated_text}"
