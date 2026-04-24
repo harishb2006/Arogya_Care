@@ -1,5 +1,6 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { extractRecommendedPolicy } from '../UserPortal';
 
 type RecommendationTableProps = {
     recommendation: string;
@@ -7,12 +8,27 @@ type RecommendationTableProps = {
 };
 
 const RecommendationTable = ({ recommendation, formData }: RecommendationTableProps) => {
+    const recommendedPolicy = extractRecommendedPolicy(recommendation);
+
     return (
         <>
             <div className="inline-block px-4 py-1 bg-teal-50 text-teal-700 rounded-full text-xs font-bold mb-4 uppercase tracking-wider">
                 Analysis Complete
             </div>
             <h2 className="text-3xl font-bold mb-6 text-slate-800">The best plan for {formData.name}</h2>
+            
+            {recommendedPolicy && (
+                <div className="bg-gradient-to-r from-teal-500 to-emerald-600 rounded-2xl p-6 mb-8 shadow-lg shadow-teal-500/20 text-white flex items-center gap-4">
+                    <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center text-2xl shrink-0">
+                        🏆
+                    </div>
+                    <div>
+                        <p className="text-teal-50 text-sm font-semibold uppercase tracking-wider mb-1">Top Recommendation</p>
+                        <h3 className="text-2xl font-bold">{recommendedPolicy}</h3>
+                    </div>
+                </div>
+            )}
+
             <div className="text-slate-600 bg-slate-50 p-6 md:p-8 rounded-2xl border border-slate-100 mb-8 shadow-inner overflow-hidden">
                 <ReactMarkdown
                     remarkPlugins={[remarkGfm]}

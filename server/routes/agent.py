@@ -87,46 +87,78 @@ def get_user_profile(user_id: str) -> dict:
     return MOCK_USER_DB.get(user_id, {"error": "User not found"})
 
 @tool
-def calculate_suitability_score(user_id: str, policy_name: str, max_coverage_lakhs: int, premium_yearly: int, waiting_period_months: int) -> dict:
-    """Rule-based scoring to calculate policy suitability objectively."""
+def fetch_and_score_all_policies(user_id: str) -> list[dict]:
+    """Fetch structured metadata and calculate suitability scores for ALL available insurance policies at once."""
     user = MOCK_USER_DB.get(user_id)
-    if not user: return {"error": "User not found"}
+    if not user: return [{"error": "User not found"}]
     
-    target_cov = 5
-    nums = re.findall(r'\d+', str(user.get('coverage', '')))
-    if nums: target_cov = int(nums[0])
+    policies = list_available_policies()
+    results = []
+    
+    import re
+    for p_name in policies:
+        meta = fetch_metadata(p_name)
+        if not meta: continue
         
-    coverage_score = 35.0
-    if max_coverage_lakhs < target_cov:
-        coverage_score = max(0.0, 35.0 - (target_cov - max_coverage_lakhs) * 3)
-    elif max_coverage_lakhs > target_cov:
-        coverage_score = 30.0 
-        
-    premium_score = 30.0
-    income_str = str(user.get('income', '')).lower()
-    if premium_yearly > 15000 and "under 3" in income_str:
-        premium_score = max(0.0, 30.0 - ((premium_yearly - 15000)/1000) * 2)
-    elif premium_yearly > 25000 and "3-8" in income_str:
-        premium_score = max(0.0, 30.0 - ((premium_yearly - 25000)/1000) * 2)
-        
-    benefits_score = float(fetch_metadata(policy_name).get('claim_convenience_score', 15.0))
-        
-    waiting_score = 15.0
-    has_disease = user.get('disease', 'none').lower() != 'none'
-    age = int(user.get('age', 30))
-    if has_disease:
-        if waiting_period_months > 24: waiting_score -= 10.0
-        elif waiting_period_months > 12: waiting_score -= 5.0
-    else:
-        if age < 30: waiting_score -= (waiting_period_months / 12) * 0.5
-        else: waiting_score -= (waiting_period_months / 12) * 1.0
+        # Safely parse numeric parameters for scoring
+        try:
+            premium = int(meta.get('premium', 0))
+        except:
+            premium = 0
             
-    total_score = round(coverage_score + premium_score + benefits_score + waiting_score, 0)
-    return {
-        "policy": policy_name,
-        "total_score": int(total_score),
-        "breakdown": {"coverage_fit": 35, "premium": 30, "claims": 20, "waiting_period": 15}
-    }
+        try:
+            cov_str = str(meta.get('max_coverage', '0'))
+            cov_match = re.findall(r'\d+', cov_str)
+            cov = int(cov_match[0]) if cov_match else 0
+        except:
+            cov = 0
+            
+        try:
+            wait_str = str(meta.get('waiting_period', '0'))
+            wait_match = re.findall(r'\d+', wait_str)
+            wait = int(wait_match[0]) if wait_match else 0
+        except:
+            wait = 0
+        
+        # Score calculation logic
+        target_cov = 5
+        nums = re.findall(r'\d+', str(user.get('coverage', '')))
+        if nums: target_cov = int(nums[0])
+            
+        coverage_score = 35.0
+        if cov < target_cov:
+            coverage_score = max(0.0, 35.0 - (target_cov - cov) * 3)
+        elif cov > target_cov:
+            coverage_score = 30.0 
+            
+        premium_score = 30.0
+        income_str = str(user.get('income', '')).lower()
+        if premium > 15000 and "under 3" in income_str:
+            premium_score = max(0.0, 30.0 - ((premium - 15000)/1000) * 2)
+        elif premium > 25000 and "3-8" in income_str:
+            premium_score = max(0.0, 30.0 - ((premium - 25000)/1000) * 2)
+            
+        benefits_score = float(meta.get('claim_convenience_score', 15.0))
+            
+        waiting_score = 15.0
+        has_disease = user.get('disease', 'none').lower() != 'none'
+        age = int(user.get('age', 30))
+        if has_disease:
+            if wait > 24: waiting_score -= 10.0
+            elif wait > 12: waiting_score -= 5.0
+        else:
+            if age < 30: waiting_score -= (wait / 12) * 0.5
+            else: waiting_score -= (wait / 12) * 1.0
+                
+        total_score = round(coverage_score + premium_score + benefits_score + waiting_score, 0)
+        
+        results.append({
+            "policy_name": p_name,
+            "metadata": meta,
+            "suitability_score": int(total_score)
+        })
+        
+    return results
 
 @tool
 def get_policy_metadata(policy_name: str) -> dict:
@@ -135,7 +167,7 @@ def get_policy_metadata(policy_name: str) -> dict:
     return res if res else {"error": "Not found"}
 
 groq_key = os.getenv("GROQ_API_KEY") or os.getenv("groq")
-llm = ChatGroq(model='llama-3.3-70b-versatile', temperature=0.1, api_key=groq_key)
+llm = ChatGroq(model='llama-3.1-8b-instant', temperature=0.1, api_key=groq_key)
 
 BASE_SYSTEM_PROMPT = """You are a warm, expert insurance advisor — not a robot. Users are disclosing personal health situations, sometimes for the first time digitally. Treat them with empathy.
 
@@ -148,10 +180,9 @@ DATA RULES (non-negotiable):
 1. YOU MUST NEVER INVENT OR HALLUCINATE POLICY NAMES.
 2. The ONLY valid candidate policies are listed below. Do NOT add any others.
 {policy_list}
-3. YOU MUST call `get_policy_metadata` for each policy to get their exact details. DO NOT guess the premiums!
-4. YOU MUST call `calculate_suitability_score` for each policy using the metadata you pulled.
-5. All policy data must come from the uploaded documents via `get_policy_metadata`, NOT from your training knowledge.
-6. If a policy metadata returns 'Not found', mark it clearly in the tables — do not skip the row.
+3. YOU MUST call `fetch_and_score_all_policies` to get details and scores for all policies in one go. Do NOT guess the premiums or other details!
+4. All policy data must come from the `fetch_and_score_all_policies` tool result, NOT from your training knowledge.
+5. If a policy metadata returns 'Not found', mark it clearly in the tables — do not skip the row.
 
 OUTPUT FORMAT — Exactly 3 required sections, in this order:
 
@@ -172,7 +203,7 @@ End with: Recommended Policy: [Policy Name]
 If the best available policy does not fully meet their needs, state the gap clearly and explain the fallback rationale.
 """
 
-tools = [retrieve_policy_chunks, get_user_profile, calculate_suitability_score, get_policy_metadata]
+tools = [retrieve_policy_chunks, get_user_profile, fetch_and_score_all_policies]
 
 @router.post('/recommend')
 def generate_recommendation(data: RecommendRequest):
@@ -202,13 +233,11 @@ def generate_recommendation(data: RecommendRequest):
             "tier": data.profile.tier_location,
         }
 
-        policy_names_str = ', '.join([f"'{p}'" for p in available_policies])
         user_input = (
             f"User profile ID {user_id}. You MUST step-by-step:\n"
-            f"1) Call get_user_profile for {user_id}\n"
-            f"2) Call get_policy_metadata for {policy_names_str}\n"
-            f"3) Call calculate_suitability_score for each policy passing their real max coverage, premium, and waiting periods.\n"
-            f"4) Finally write the 5-section response without hallucinating."
+            f"1) Call fetch_and_score_all_policies for {user_id} to get metadata and score for all policies.\n"
+            f"2) Call get_user_profile for {user_id} to understand the specific patient.\n"
+            f"3) Finally write the 3-section response without hallucinating based on the data you got."
         )
         result = agent_executor.invoke({'input': user_input})
         return {'recommendation': result['output']}

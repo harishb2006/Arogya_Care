@@ -51,8 +51,7 @@ const Chat: React.FC<ChatProps> = ({ profile, recommendedPolicy }) => {
     const quickPrompts = [
         'What does co-pay mean for me?',
         'How does the waiting period affect my conditions?',
-        'Give me a real claim scenario',
-        'What is excluded from this policy?',
+        
     ];
 
     return (
