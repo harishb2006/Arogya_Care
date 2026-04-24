@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import PolicyUpload from './UploadDocs';
+import PolicyUpload from '../components/UploadDocs';
 
 // --- Types ---
 interface PolicyDocument {
@@ -23,7 +23,19 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout }) => {
   React.useEffect(() => {
     fetch('http://localhost:8000/admin/documents')
       .then(res => res.json())
-      .then(data => setPolicies(data))
+      .then(data => {
+        // Retrieve and merge pending processing documents from localStorage
+        const pendingDocsJSON = localStorage.getItem('pendingProcessingDocs');
+        if (pendingDocsJSON) {
+           const pendingDocs: PolicyDocument[] = JSON.parse(pendingDocsJSON);
+           // Remove pending docs that have now been processed/returned by the API
+           const stillPending = pendingDocs.filter(pd => !data.find((d: PolicyDocument) => d.name === pd.name));
+           localStorage.setItem('pendingProcessingDocs', JSON.stringify(stillPending));
+           setPolicies([...stillPending, ...data]);
+        } else {
+           setPolicies(data);
+        }
+      })
       .catch(err => console.error("Failed to fetch policies:", err));
   }, []);
 
@@ -158,14 +170,19 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout }) => {
         <PolicyUpload
           onClose={() => setIsUploading(false)}
           onUploadComplete={(metadata) => {
-            const newPolicy = {
+            const newPolicy: PolicyDocument = {
               id: Date.now().toString(),
               name: metadata.name,
               uploadDate: metadata.timestamp,
               size: 'Pending',
               status: 'processing' as const
             };
-            setPolicies([newPolicy, ...policies]);
+            
+            const pendingDocsJSON = localStorage.getItem('pendingProcessingDocs');
+            const pendingDocs = pendingDocsJSON ? JSON.parse(pendingDocsJSON) : [];
+            localStorage.setItem('pendingProcessingDocs', JSON.stringify([...pendingDocs, newPolicy]));
+            
+            setPolicies(prev => [newPolicy, ...prev]);
             setIsUploading(false);
           }}
         />
