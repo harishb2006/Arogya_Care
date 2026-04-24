@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import AdminLogin from './app/pages/AdminLogin';
-import AdminDashboard from './components/AdminDashboard';
-import UserPortal from './components/UserPortal';
-import LandingPage from './components/LandingPage';
+import AdminLogin from './pages/AdminLogin';
+import AdminDashboard from './pages/AdminDashboard';
+import UserPortal from './pages/UserPortal/UserPortal';
+import LandingPage from './pages/LandingPage';
 import './index.css';
 
 const App = () => {
