@@ -24,7 +24,7 @@ const App = () => {
 
   return (
     <>
-      <div className="absolute top-4 left-4 z-50">
+      <div className="absolute bottom-8 right-8 z-50 shadow-xl rounded-lg">
         <button onClick={() => setView('portal')} className="px-4 py-2 bg-slate-200 hover:bg-slate-300 rounded-lg text-sm font-bold text-slate-700 transition">
           ← Back to Portal
         </button>
