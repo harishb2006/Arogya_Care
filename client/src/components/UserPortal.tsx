@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Link } from 'react-router-dom';
 import AITextLoading from './AITextLoading';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
-const UserPortal = ({ onAdminClick }) => {
+const UserPortal = () => {
     const [currentStep, setCurrentStep] = useState(0);
     const [formData, setFormData] = useState({
         name: '',
@@ -82,7 +85,7 @@ const UserPortal = ({ onAdminClick }) => {
                     <div className="w-8 h-8 bg-teal-600 rounded-lg flex items-center justify-center text-white font-bold">A</div>
                     <span className="text-xl font-bold tracking-tight">Aarogya<span className="text-teal-600">Aid</span></span>
                 </div>
-                <button onClick={onAdminClick} className="text-xs font-medium text-slate-400 hover:text-teal-600 transition-colors uppercase tracking-widest">Admin Access</button>
+                <Link to="/" className="text-xs font-medium bg-slate-100 px-4 py-2 rounded-full text-slate-500 hover:text-teal-600 hover:bg-teal-50 transition-colors uppercase tracking-widest">← Home</Link>
             </header>
 
             <main className="flex flex-col items-center justify-center px-6 py-12">
@@ -110,8 +113,22 @@ const UserPortal = ({ onAdminClick }) => {
                                     Analysis Complete
                                 </div>
                                 <h2 className="text-3xl font-bold mb-6 text-slate-800">The best plan for {formData.name}</h2>
-                                <div className="prose prose-slate text-slate-600 leading-relaxed bg-slate-50 p-6 rounded-2xl border border-slate-100 mb-8 whitespace-pre-wrap">
-                                    {recommendation}
+                                <div className="text-slate-600 bg-slate-50 p-6 md:p-8 rounded-2xl border border-slate-100 mb-8 shadow-inner overflow-hidden">
+                                    <ReactMarkdown
+                                        remarkPlugins={[remarkGfm]}
+                                        components={{
+                                            h3: ({ node, ...props }) => <h3 className="text-xl font-bold text-teal-800 mt-8 mb-4 tracking-tight" {...props} />,
+                                            table: ({ node, ...props }) => <div className="overflow-x-auto my-6 shadow-sm rounded-xl border border-slate-200"><table className="min-w-full divide-y divide-slate-200 bg-white" {...props} /></div>,
+                                            th: ({ node, ...props }) => <th className="px-6 py-4 bg-slate-100/50 text-left text-xs font-bold text-slate-700 uppercase tracking-widest border-b-2 border-slate-200" {...props} />,
+                                            td: ({ node, ...props }) => <td className="px-6 py-4 text-sm text-slate-600 border-t border-slate-100 align-top" {...props} />,
+                                            tr: ({ node, ...props }) => <tr className="hover:bg-slate-50/50 transition-colors" {...props} />,
+                                            p: ({ node, ...props }) => <p className="mb-4 leading-relaxed text-[15px]" {...props} />,
+                                            ul: ({ node, ...props }) => <ul className="list-disc pl-5 mb-4 space-y-1 text-[15px]" {...props} />,
+                                            li: ({ node, ...props }) => <li className="marker:text-teal-500" {...props} />,
+                                        }}
+                                    >
+                                        {recommendation}
+                                    </ReactMarkdown>
                                 </div>
                                 <button
                                     onClick={() => {
