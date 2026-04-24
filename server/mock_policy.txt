@@ -1,0 +1,12 @@
+Policy Name: Aarogya Shield Plus
+Insurer: Aarogya Insurance
+Premium: 18500
+Max Coverage: 5L
+Waiting Period: 36 months
+Co-pay: 0% below age 60
+Key Benefit: Lowest premium, direct ₹5L match
+Inclusions: Cashless treatment at 9,000+ hospitals, pre/post hospitalization
+Exclusions: Cosmetic surgery, self-inflicted injuries
+Sub-limits: Not clearly stated
+Claim Type: Cashless + Reimbursement
+Convenience Score: 18 out of 20

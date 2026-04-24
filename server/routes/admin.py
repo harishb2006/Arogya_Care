@@ -14,6 +14,38 @@ import cohere
 import uuid
 from datetime import datetime
 from database import qdrant, COLLECTION_NAME
+from langchain_groq import ChatGroq
+from pydantic import BaseModel, Field
+
+class PolicyMetadataSchema(BaseModel):
+    policy_name: str = Field(description="The exact name of the policy, e.g. HealthGuard Max Secure")
+    insurer: str = Field(description="Name of the insurance company")
+    premium: int = Field(description="Yearly premium as an integer, e.g. 18500")
+    max_coverage: str = Field(description="Max coverage amount, e.g. '5L' or '10L'")
+    waiting_period: str = Field(description="Waiting period in months, e.g. '36 months'")
+    co_pay: str = Field(description="Co-pay details, e.g. '0% below age 60'")
+    key_benefit: str = Field(description="A short summary of the key benefit")
+    inclusions: str = Field(description="List of inclusions")
+    exclusions: str = Field(description="List of exclusions")
+    sub_limits: str = Field(description="Details on sub-limits")
+    claim_type: str = Field(description="Type of claim processing")
+    claim_convenience_score: int = Field(description="Claim convenience score out of 20, e.g. 18")
+
+def extract_metadata_from_text(text: str) -> dict:
+    groq_key = os.getenv("GROQ_API_KEY") or os.getenv("groq")
+    if not groq_key: return {}
+    try:
+        llm = ChatGroq(model='llama-3.3-70b-versatile', temperature=0.0, api_key=groq_key)
+        structured_llm = llm.with_structured_output(PolicyMetadataSchema)
+        truncated_text = text[:100000] 
+        prompt = f"Extract the policy metadata accurately from the following document.\n\nDocument:\n{truncated_text}"
+        result = structured_llm.invoke(prompt)
+        return result.model_dump() if result else {}
+    except Exception as e:
+        print(f"Extraction error: {e}")
+        return {}
+from datetime import datetime
+from database import qdrant, COLLECTION_NAME
 
 load_dotenv()
 
@@ -107,10 +139,28 @@ async def upload_document(
         response = co.embed(texts=chunks, model="embed-english-v3.0", input_type="search_document")
         embeddings = response.embeddings
 
+        # Extract structured metadata via LLM pre-check
+        extracted_metadata = extract_metadata_from_text(text)
+
         # Store in Qdrant Local
         points = []
         doc_id = str(uuid.uuid4())
         
+        if extracted_metadata and extracted_metadata.get("policy_name"):
+            meta_point_id = str(uuid.uuid4())
+            meta_resp = co.embed(texts=[extracted_metadata["policy_name"]], model="embed-english-v3.0", input_type="search_document")
+            points.append(
+                PointStruct(
+                    id=meta_point_id,
+                    vector=meta_resp.embeddings[0],
+                    payload={
+                        "type": "structured_metadata",
+                        "document_id": doc_id,
+                        **extracted_metadata
+                    }
+                )
+            )
+
         for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
             points.append(
                 PointStruct(
