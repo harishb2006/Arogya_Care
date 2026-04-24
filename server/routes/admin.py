@@ -25,27 +25,29 @@ class PolicyMetadataSchema(BaseModel):
     waiting_period: str = Field(description="Waiting period in months, e.g. '36 months'")
     co_pay: str = Field(description="Co-pay details, e.g. '0% below age 60'")
     key_benefit: str = Field(description="A short summary of the key benefit")
-    inclusions: str = Field(description="List of inclusions")
-    exclusions: str = Field(description="List of exclusions")
-    sub_limits: str = Field(description="Details on sub-limits")
+    inclusions: str = Field(description="List of inclusions, or 'Not specified'")
+    exclusions: str = Field(description="List of exclusions, or 'Not specified'")
+    sub_limits: str = Field(description="Details on sub-limits, or 'Not specified'")
     claim_type: str = Field(description="Type of claim processing")
-    claim_convenience_score: int = Field(description="Claim convenience score out of 20, e.g. 18")
+    claim_convenience_score: int = Field(description="Claim convenience score out of 20. Cashless=20, Cashless+Reimbursement=18, Reimbursement only=14")
 
-def extract_metadata_from_text(text: str) -> dict:
+class PolicyListSchema(BaseModel):
+    policies: list[PolicyMetadataSchema] = Field(description="List of ALL insurance policies found in the document")
+
+def extract_metadata_from_text(text: str) -> list[dict]:
     groq_key = os.getenv("GROQ_API_KEY") or os.getenv("groq")
-    if not groq_key: return {}
+    if not groq_key: return []
     try:
         llm = ChatGroq(model='llama-3.3-70b-versatile', temperature=0.0, api_key=groq_key)
-        structured_llm = llm.with_structured_output(PolicyMetadataSchema)
-        truncated_text = text[:100000] 
-        prompt = f"Extract the policy metadata accurately from the following document.\n\nDocument:\n{truncated_text}"
+        structured_llm = llm.with_structured_output(PolicyListSchema)
+        truncated_text = text[:100000]
+        prompt = f"Extract ALL insurance policies from the following document. Return every policy you find as a separate item in the list.\n\nDocument:\n{truncated_text}"
         result = structured_llm.invoke(prompt)
-        return result.model_dump() if result else {}
+        print(f"Extracted {len(result.policies) if result else 0} policies from document")
+        return [p.model_dump() for p in result.policies] if result else []
     except Exception as e:
         print(f"Extraction error: {e}")
-        return {}
-from datetime import datetime
-from database import qdrant, COLLECTION_NAME
+        return []
 
 load_dotenv()
 
@@ -139,27 +141,28 @@ async def upload_document(
         response = co.embed(texts=chunks, model="embed-english-v3.0", input_type="search_document")
         embeddings = response.embeddings
 
-        # Extract structured metadata via LLM pre-check
-        extracted_metadata = extract_metadata_from_text(text)
+        # Extract ALL structured metadata via LLM pre-check
+        all_extracted_policies = extract_metadata_from_text(text)
 
         # Store in Qdrant Local
         points = []
         doc_id = str(uuid.uuid4())
-        
-        if extracted_metadata and extracted_metadata.get("policy_name"):
-            meta_point_id = str(uuid.uuid4())
-            meta_resp = co.embed(texts=[extracted_metadata["policy_name"]], model="embed-english-v3.0", input_type="search_document")
-            points.append(
-                PointStruct(
-                    id=meta_point_id,
-                    vector=meta_resp.embeddings[0],
-                    payload={
-                        "type": "structured_metadata",
-                        "document_id": doc_id,
-                        **extracted_metadata
-                    }
+
+        # Upsert one metadata point per policy found
+        for policy_meta in all_extracted_policies:
+            if policy_meta.get("policy_name"):
+                meta_resp = co.embed(texts=[policy_meta["policy_name"]], model="embed-english-v3.0", input_type="search_document")
+                points.append(
+                    PointStruct(
+                        id=str(uuid.uuid4()),
+                        vector=meta_resp.embeddings[0],
+                        payload={
+                            "type": "structured_metadata",
+                            "document_id": doc_id,
+                            **policy_meta
+                        }
+                    )
                 )
-            )
 
         for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
             points.append(

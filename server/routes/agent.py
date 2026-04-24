@@ -26,6 +26,12 @@ class UserProfile(BaseModel):
 class RecommendRequest(BaseModel):
     profile: UserProfile
 
+class ChatRequest(BaseModel):
+    profile: UserProfile
+    recommended_policy: str
+    message: str
+    chat_history: Optional[List[dict]] = []
+
 # MOCK Databases for tools
 MOCK_USER_DB = {}
 
@@ -131,32 +137,39 @@ def get_policy_metadata(policy_name: str) -> dict:
 groq_key = os.getenv("GROQ_API_KEY") or os.getenv("groq")
 llm = ChatGroq(model='llama-3.3-70b-versatile', temperature=0.1, api_key=groq_key)
 
-BASE_SYSTEM_PROMPT = """You are an elite, analytical insurance advisory AI Agent.
-CRITICAL RULES:
+BASE_SYSTEM_PROMPT = """You are a warm, expert insurance advisor — not a robot. Users are disclosing personal health situations, sometimes for the first time digitally. Treat them with empathy.
+
+TONE RULES (non-negotiable):
+- Always open with a sentence acknowledging the user's health situation or lifestyle before any numbers or policy names.
+- Define every insurance term the first time it appears in parentheses. Example: "waiting period (the time before pre-existing condition claims are accepted)".
+- If no policy fully meets the user's needs, suggest the best available alternative and explain clearly why — never leave the user with a dead end.
+
+DATA RULES (non-negotiable):
 1. YOU MUST NEVER INVENT OR HALLUCINATE POLICY NAMES.
 2. The ONLY valid candidate policies are listed below. Do NOT add any others.
 {policy_list}
 3. YOU MUST call `get_policy_metadata` for each policy to get their exact details. DO NOT guess the premiums!
 4. YOU MUST call `calculate_suitability_score` for each policy using the metadata you pulled.
-5. If exact coverage is not met, explicitly state the fallback strategy safely.
-6. If a policy returns 'Not found', mark it clearly in the tables - do not skip it.
+5. All policy data must come from the uploaded documents via `get_policy_metadata`, NOT from your training knowledge.
+6. If a policy metadata returns 'Not found', mark it clearly in the tables — do not skip the row.
 
-OUTPUT FORMAT (Exactly 5 sections matching exactly this text):
-## 1. Initial Assessment
-Write a paragraph detailing how profile dictates strategy.
-## 2. Peer Comparison Table
+OUTPUT FORMAT — Exactly 3 required sections, in this order:
+
+## Peer Comparison Table
+Show the recommended policy vs. all available alternatives.
 | Policy Name | Insurer | Premium (₹/yr) | Cover Amount | Waiting Period | Key Benefit | Suitability Score |
-## 3. Coverage Detail Table
+All columns must be populated from uploaded documents. At least 2 peer policies must be shown. No placeholder text.
+
+## Coverage Detail Table
+Single-row breakdown of the recommended policy only:
 | Policy Name | Inclusions | Exclusions | Sub-limits | Co-pay % | Claim Type |
-## 4. Why This Policy (Decision-Grade Logic)
-Explicit fallback strategy if target not met. Write Recommended Policy: X.
-## 5. Scoring Logic Used
-Write precisely:
-Suitability Score was calculated using:
-* Coverage Match → 35%
-* Premium Affordability → 30%
-* Claim Convenience / Network → 20%
-* Waiting Period → 15%
+Data must be sourced from the policy document via RAG — not from training knowledge.
+
+## Why This Policy
+Write a personalised explanation of 150-250 words connecting the policy's features explicitly to THIS user's profile.
+REQUIREMENT: You must explicitly reference at least 3 of the 6 profile fields (name, age, lifestyle, pre-existing conditions, income bracket, city tier) in your reasoning.
+End with: Recommended Policy: [Policy Name]
+If the best available policy does not fully meet their needs, state the gap clearly and explain the fallback rationale.
 """
 
 tools = [retrieve_policy_chunks, get_user_profile, calculate_suitability_score, get_policy_metadata]
@@ -201,6 +214,57 @@ def generate_recommendation(data: RecommendRequest):
         return {'recommendation': result['output']}
     except HTTPException:
         raise
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+# In-memory chat session storage (maps session_id -> LLM-format message dicts)
+CHAT_SESSIONS: dict = {}
+
+CHAT_SYSTEM_PROMPT = """You are a warm, expert insurance policy explainer helping {name}, a {age}-year-old with a {lifestyle} lifestyle and {conditions} in {tier}.
+The recommended plan is: **{policy}**.
+
+Your job:
+1. Define any insurance term clearly in plain English the first time it appears (deductible, co-pay, sub-limit, waiting period, exclusion, cashless, reimbursement, restore benefit).
+2. When asked how something applies to this person, generate a realistic, concrete scenario using their actual health conditions and city tier.
+3. For every factual claim about a policy, call `retrieve_policy_chunks` to find the source text, then cite it: "According to [document name], ..."
+4. Never re-ask for information already provided — you already know the profile and recommended policy above.
+5. Never invent policy details. If you cannot find something in the documents, say so explicitly.
+"""
+
+@router.post('/chat')
+def chat_with_agent(data: ChatRequest):
+    try:
+        profile = data.profile
+        system_prompt = CHAT_SYSTEM_PROMPT.format(
+            name=getattr(profile, 'name', 'the user') if hasattr(profile, 'name') else 'the user',
+            age=profile.age,
+            lifestyle=profile.lifestyle,
+            conditions=profile.pre_existing_conditions or 'no pre-existing conditions',
+            tier=profile.tier_location,
+            policy=data.recommended_policy,
+        )
+
+        chat_tools = [retrieve_policy_chunks, get_policy_metadata]
+        chat_prompt = ChatPromptTemplate.from_messages([
+            ('system', system_prompt),
+            MessagesPlaceholder(variable_name='chat_history'),
+            ('user', '{input}'),
+            MessagesPlaceholder(variable_name='agent_scratchpad'),
+        ])
+        chat_agent = create_tool_calling_agent(llm, chat_tools, chat_prompt)
+        chat_executor = AgentExecutor(agent=chat_agent, tools=chat_tools, verbose=True)
+
+        # Reconstruct LangChain message history format
+        from langchain_core.messages import HumanMessage, AIMessage
+        history = []
+        for turn in (data.chat_history or []):
+            if turn.get('role') == 'user':
+                history.append(HumanMessage(content=turn['content']))
+            elif turn.get('role') == 'assistant':
+                history.append(AIMessage(content=turn['content']))
+
+        result = chat_executor.invoke({'input': data.message, 'chat_history': history})
+        return {'reply': result['output']}
     except Exception as e:
         import traceback; traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
