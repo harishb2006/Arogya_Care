@@ -20,61 +20,53 @@ class UserProfile(BaseModel):
     age: int
     income: str
     pre_existing_conditions: str
+    lifestyle: str
     tier_location: str
-    cover_amount: str
-    fears_concerns: str
 
 class RecommendRequest(BaseModel):
     profile: UserProfile
 
-class ChatRequest(BaseModel):
-    profile: UserProfile
-    message: str
-    chat_history: Optional[List[dict]] = []
-
 # MOCK Databases for tools
 MOCK_USER_DB = {}
-MOCK_METADATA_DB = {
-    "Aarogya Shield Plus": {
-        "insurer": "Aarogya Insurance",
-        "premium": 18500,
-        "max_coverage": "5L",
-        "waiting_period": "36 months",
-        "co_pay": "0% below age 60",
-        "key_benefit": "Lowest premium, direct ₹5L match",
-        "inclusions": "Cashless treatment at 9,000+ hospitals, pre/post hospitalization",
-        "exclusions": "Cosmetic surgery, self-inflicted injuries",
-        "sub_limits": "Not clearly stated",
-        "claim_type": "Cashless + Reimbursement",
-        "claim_convenience_score": 18 # out of 20
-    },
-    "HealthGuard Max Secure": {
-        "insurer": "HealthGuard Insurance",
-        "premium": 27900,
-        "max_coverage": "10L",
-        "waiting_period": "24 months",
-        "co_pay": "10% if age 61+",
-        "key_benefit": "Shortest waiting period + restore benefit",
-        "inclusions": "Restore benefit, teleconsultation, 11,500+ hospitals",
-        "exclusions": "Non-accident dental, experimental treatment",
-        "sub_limits": "Not clearly stated",
-        "claim_type": "Cashless + Reimbursement",
-        "claim_convenience_score": 20 # out of 20
-    },
-    "Family Care ReAssure Gold": {
-        "insurer": "Family Care Insurance",
-        "premium": 24300,
-        "max_coverage": "10L",
-        "waiting_period": "48 months",
-        "co_pay": "0% mandatory",
-        "key_benefit": "Higher cover with lower premium than HealthGuard",
-        "inclusions": "Unlimited refill, maternity after 24 months",
-        "exclusions": "Infertility, cosmetic, adventure sports",
-        "sub_limits": "Not clearly stated",
-        "claim_type": "Cashless + Reimbursement",
-        "claim_convenience_score": 19 # out of 20
-    }
-}
+
+def list_available_policies() -> list[str]:
+    """Fetch all policy names that have been ingested as structured metadata in Qdrant."""
+    from qdrant_client.http.models import Filter, FieldCondition, MatchValue
+    try:
+        records, _ = qdrant.scroll(
+            collection_name=COLLECTION_NAME,
+            scroll_filter=Filter(
+                must=[FieldCondition(key="type", match=MatchValue(value="structured_metadata"))]
+            ),
+            limit=100,
+            with_payload=True,
+            with_vectors=False
+        )
+        return [r.payload.get('policy_name') for r in records if r.payload.get('policy_name')]
+    except Exception as e:
+        print(f"Error listing policies: {e}")
+        return []
+
+def fetch_metadata(policy_name: str) -> dict:
+    from qdrant_client.http.models import Filter, FieldCondition, MatchValue
+    try:
+        records, _ = qdrant.scroll(
+            collection_name=COLLECTION_NAME,
+            scroll_filter=Filter(
+                must=[
+                    FieldCondition(key="type", match=MatchValue(value="structured_metadata")),
+                    FieldCondition(key="policy_name", match=MatchValue(value=policy_name))
+                ]
+            ),
+            limit=1,
+            with_payload=True,
+            with_vectors=False
+        )
+        if records:
+            return records[0].payload
+    except Exception as e:
+        print(f"Error fetching metadata: {e}")
+    return {}
 
 @tool
 def retrieve_policy_chunks(query: str, top_k: int = 5) -> str:
@@ -111,7 +103,7 @@ def calculate_suitability_score(user_id: str, policy_name: str, max_coverage_lak
     elif premium_yearly > 25000 and "3-8" in income_str:
         premium_score = max(0.0, 30.0 - ((premium_yearly - 25000)/1000) * 2)
         
-    benefits_score = MOCK_METADATA_DB.get(policy_name, {}).get('claim_convenience_score', 15.0)
+    benefits_score = float(fetch_metadata(policy_name).get('claim_convenience_score', 15.0))
         
     waiting_score = 15.0
     has_disease = user.get('disease', 'none').lower() != 'none'
@@ -133,18 +125,21 @@ def calculate_suitability_score(user_id: str, policy_name: str, max_coverage_lak
 @tool
 def get_policy_metadata(policy_name: str) -> dict:
     """Fetch structured columns for tables"""
-    return MOCK_METADATA_DB.get(policy_name, {"error": "Not found"})
+    res = fetch_metadata(policy_name)
+    return res if res else {"error": "Not found"}
 
 groq_key = os.getenv("GROQ_API_KEY") or os.getenv("groq")
 llm = ChatGroq(model='llama-3.3-70b-versatile', temperature=0.1, api_key=groq_key)
 
-SYSTEM_PROMPT = """You are an elite, analytical insurance advisory AI Agent.
+BASE_SYSTEM_PROMPT = """You are an elite, analytical insurance advisory AI Agent.
 CRITICAL RULES:
-1. YOU MUST NEVER INVENT OR HALLUCINATE POLICY NAMES. 
-2. The only valid candidate policies are: "Aarogya Shield Plus", "HealthGuard Max Secure", "Family Care ReAssure Gold".
-3. YOU MUST call `get_policy_metadata` for these policies to get their details. DO NOT guess the premiums!
-4. YOU MUST call `calculate_suitability_score` for these policies using the metadata you pulled.
+1. YOU MUST NEVER INVENT OR HALLUCINATE POLICY NAMES.
+2. The ONLY valid candidate policies are listed below. Do NOT add any others.
+{policy_list}
+3. YOU MUST call `get_policy_metadata` for each policy to get their exact details. DO NOT guess the premiums!
+4. YOU MUST call `calculate_suitability_score` for each policy using the metadata you pulled.
 5. If exact coverage is not met, explicitly state the fallback strategy safely.
+6. If a policy returns 'Not found', mark it clearly in the tables - do not skip it.
 
 OUTPUT FORMAT (Exactly 5 sections matching exactly this text):
 ## 1. Initial Assessment
@@ -164,34 +159,48 @@ Suitability Score was calculated using:
 * Waiting Period → 15%
 """
 
-prompt = ChatPromptTemplate.from_messages([
-    ('system', SYSTEM_PROMPT),
-    ('user', '{input}'),
-    MessagesPlaceholder(variable_name='agent_scratchpad')
-])
-
 tools = [retrieve_policy_chunks, get_user_profile, calculate_suitability_score, get_policy_metadata]
-agent = create_tool_calling_agent(llm, tools, prompt)
-agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
 
 @router.post('/recommend')
 def generate_recommendation(data: RecommendRequest):
     try:
+        # --- Dynamically discover policies from Qdrant ---
+        available_policies = list_available_policies()
+        if not available_policies:
+            raise HTTPException(status_code=400, detail="No policy documents have been indexed yet. Please upload policy documents via the Admin portal first.")
+
+        policy_list_str = '\n'.join([f'  - "{p}"' for p in available_policies])
+        system_prompt = BASE_SYSTEM_PROMPT.format(policy_list=policy_list_str)
+
+        prompt = ChatPromptTemplate.from_messages([
+            ('system', system_prompt),
+            ('user', '{input}'),
+            MessagesPlaceholder(variable_name='agent_scratchpad')
+        ])
+        agent = create_tool_calling_agent(llm, tools, prompt)
+        agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
+
         user_id = str(uuid.uuid4())
         MOCK_USER_DB[user_id] = {
-            "age": data.profile.age, "disease": data.profile.pre_existing_conditions,
-            "income": data.profile.income, "tier": data.profile.tier_location,
-            "fears": data.profile.fears_concerns, "coverage": data.profile.cover_amount
+            "age": data.profile.age,
+            "disease": data.profile.pre_existing_conditions,
+            "income": data.profile.income,
+            "lifestyle": data.profile.lifestyle,
+            "tier": data.profile.tier_location,
         }
+
+        policy_names_str = ', '.join([f"'{p}'" for p in available_policies])
         user_input = (
             f"User profile ID {user_id}. You MUST step-by-step:\n"
             f"1) Call get_user_profile for {user_id}\n"
-            f"2) Call get_policy_metadata for 'Aarogya Shield Plus', 'HealthGuard Max Secure', 'Family Care ReAssure Gold'\n"
-            f"3) Call calculate_suitability_score for these policies passing their real max coverage, premium, and waiting periods.\n"
+            f"2) Call get_policy_metadata for {policy_names_str}\n"
+            f"3) Call calculate_suitability_score for each policy passing their real max coverage, premium, and waiting periods.\n"
             f"4) Finally write the 5-section response without hallucinating."
         )
         result = agent_executor.invoke({'input': user_input})
         return {'recommendation': result['output']}
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback; traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))

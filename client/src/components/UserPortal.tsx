@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import AITextLoading from './AITextLoading';
@@ -10,25 +10,23 @@ const UserPortal = () => {
     const [formData, setFormData] = useState({
         name: '',
         age: '',
+        lifestyle: '',
+        pre_existing_conditions: [] as string[],
         income: '',
-        pre_existing_conditions: 'None',
         tier_location: '',
-        cover_amount: '',
-        fears_concerns: ''
     });
     const [loading, setLoading] = useState(false);
     const [recommendation, setRecommendation] = useState(null);
     const [error, setError] = useState(false);
 
-    // Personalized questions array
+    // Spec-defined 6 fields
     const steps = [
         { id: 'name', label: "First, what's your name?", type: 'text', placeholder: 'Enter your name' },
         { id: 'age', label: `Nice to meet you, ${formData.name}! How old are you?`, type: 'number', placeholder: 'e.g. 25' },
-        { id: 'income', label: "What's your annual income bracket?", type: 'select', options: ['Under 3L', '3-8L', 'Above 8L'] },
-        { id: 'pre_existing_conditions', label: "Any health conditions we should know about?", type: 'text', placeholder: 'e.g. None or Diabetes' },
-        { id: 'tier_location', label: "Where are you currently located?", type: 'select', options: ['Tier-1 (Metro)', 'Tier-2/3', 'Rural'] },
-        { id: 'cover_amount', label: "How much coverage are you looking for?", type: 'text', placeholder: 'e.g. 10 Lakhs' },
-        { id: 'fears_concerns', label: "What's your biggest concern with insurance?", type: 'text', placeholder: 'e.g. Claim rejection' },
+        { id: 'lifestyle', label: "What best describes your lifestyle?", type: 'select', options: ['Sedentary', 'Moderate', 'Active', 'Athlete'], hint: 'Active users are prioritised for OPD cover' },
+        { id: 'pre_existing_conditions', label: "Any pre-existing conditions?", type: 'multiselect', options: ['Diabetes', 'Hypertension', 'Asthma', 'Cardiac', 'None', 'Other'] },
+        { id: 'income', label: "What's your annual income bracket?", type: 'select', options: ['Under 3L', '3-8L', '8-15L', '15L+'] },
+        { id: 'tier_location', label: "Where are you currently located?", type: 'select', options: ['Metro', 'Tier-2', 'Tier-3'] },
     ];
 
     const loadingMessages = [
@@ -41,30 +39,30 @@ const UserPortal = () => {
 
 
     const handleNext = () => {
-        const currentFieldId = steps[currentStep].id;
-        if (currentFieldId !== 'pre_existing_conditions' && !formData[currentFieldId]) {
-            setError(true);
-            return; // Prevent user from proceeding if the field is empty
-        }
-
+        const step = steps[currentStep];
+        const val = formData[step.id];
+        // multiselect: must pick at least one; text/number: must be non-empty; select: non-empty
+        const isEmpty = step.type === 'multiselect' ? (val as string[]).length === 0 : !val;
+        if (isEmpty) { setError(true); return; }
         setError(false);
-        if (currentStep < steps.length - 1) {
-            setCurrentStep(currentStep + 1);
-        } else {
-            submitData();
-        }
+        if (currentStep < steps.length - 1) setCurrentStep(currentStep + 1);
+        else submitData();
     };
 
     const submitData = async () => {
         setLoading(true);
         try {
+            const profilePayload = {
+                ...formData,
+                pre_existing_conditions: (formData.pre_existing_conditions as string[]).join(', ') || 'None',
+            };
             const [res] = await Promise.all([
                 fetch('http://localhost:8000/agent/recommend', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ profile: formData })
+                    body: JSON.stringify({ profile: profilePayload })
                 }),
-                new Promise(resolve => setTimeout(resolve, 4000)) // Force delay to let animation finish before showing recommendation
+                new Promise(resolve => setTimeout(resolve, 4000))
             ]);
             const data = await res.json();
             setRecommendation(data.recommendation);
@@ -135,11 +133,10 @@ const UserPortal = () => {
                                         setFormData({
                                             name: '',
                                             age: '',
+                                            lifestyle: '',
+                                            pre_existing_conditions: [],
                                             income: '',
-                                            pre_existing_conditions: 'None',
                                             tier_location: '',
-                                            cover_amount: '',
-                                            fears_concerns: ''
                                         });
                                         setCurrentStep(0);
                                         setRecommendation(null);
@@ -192,23 +189,60 @@ const UserPortal = () => {
 
                                 <div className="relative group">
                                     {steps[currentStep].type === 'select' ? (
-                                        <select
-                                            value={formData[steps[currentStep].id]}
-                                            onChange={(e) => {
-                                                setFormData({ ...formData, [steps[currentStep].id]: e.target.value });
-                                                setError(false);
-                                            }}
-                                            className="w-full bg-transparent border-b-2 border-slate-200 py-4 text-2xl focus:border-teal-600 outline-none transition-colors appearance-none cursor-pointer"
-                                        >
-                                            <option value="" disabled>Select an option</option>
-                                            {steps[currentStep].options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                                        </select>
+                                        <>
+                                            <select
+                                                value={formData[steps[currentStep].id] as string}
+                                                onChange={(e) => {
+                                                    setFormData({ ...formData, [steps[currentStep].id]: e.target.value });
+                                                    setError(false);
+                                                }}
+                                                className="w-full bg-transparent border-b-2 border-slate-200 py-4 text-2xl focus:border-teal-600 outline-none transition-colors appearance-none cursor-pointer"
+                                            >
+                                                <option value="" disabled>Select an option</option>
+                                                {steps[currentStep].options!.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                                            </select>
+                                            {steps[currentStep].hint && (
+                                                <p className="mt-3 text-sm text-teal-600 font-medium flex items-center gap-1.5">
+                                                    <span>💡</span> {steps[currentStep].hint}
+                                                </p>
+                                            )}
+                                        </>
+                                    ) : steps[currentStep].type === 'multiselect' ? (
+                                        <div className="flex flex-wrap gap-3 pt-2">
+                                            {steps[currentStep].options!.map(opt => {
+                                                const selected = (formData.pre_existing_conditions as string[]).includes(opt);
+                                                return (
+                                                    <button
+                                                        key={opt}
+                                                        type="button"
+                                                        onClick={() => {
+                                                            const current = formData.pre_existing_conditions as string[];
+                                                            let next: string[];
+                                                            if (opt === 'None') {
+                                                                next = selected ? [] : ['None'];
+                                                            } else {
+                                                                const withoutNone = current.filter(v => v !== 'None');
+                                                                next = selected ? withoutNone.filter(v => v !== opt) : [...withoutNone, opt];
+                                                            }
+                                                            setFormData({ ...formData, pre_existing_conditions: next });
+                                                            setError(false);
+                                                        }}
+                                                        className={`px-5 py-2.5 rounded-xl border-2 font-semibold text-base transition-all ${selected
+                                                            ? 'bg-teal-600 border-teal-600 text-white shadow-lg shadow-teal-600/20'
+                                                            : 'border-slate-200 text-slate-600 hover:border-teal-300 hover:bg-slate-50'
+                                                            }`}
+                                                    >
+                                                        {opt}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
                                     ) : (
                                         <input
                                             autoFocus
                                             type={steps[currentStep].type}
                                             placeholder={steps[currentStep].placeholder}
-                                            value={formData[steps[currentStep].id]}
+                                            value={formData[steps[currentStep].id] as string}
                                             onChange={(e) => {
                                                 setFormData({ ...formData, [steps[currentStep].id]: e.target.value });
                                                 setError(false);
